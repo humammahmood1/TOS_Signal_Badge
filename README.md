@@ -7,6 +7,7 @@ Thinkorswim (ThinkScript) study: **Signal Badge v2.0** — a composite score fro
 | Path | Purpose |
 |------|---------|
 | `thinkscript/SignalBadge_v2.ts` | **Main study** — paste into Thinkorswim (ThinkScript; `.ts` is for editor recognition, not TypeScript) |
+| `docs/ThinkScript_Signal_Badge_Execution_Plan.docx` | Execution plan (methodology / rollout) |
 
 ## Install in Thinkorswim
 
