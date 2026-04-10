@@ -1,36 +1,30 @@
 # TOS Signal Badge
 
-Thinkorswim (ThinkScript) study that draws **trading signal badges** on **Japanese candlestick** charts—chart bubbles and optional arrows when your conditions are true.
+Thinkorswim (ThinkScript) study: **Signal Badge v2.0** — a composite score from seven indicator groups, shown as **color-coded labels** on the chart (intraday-oriented; see script header for scoring and overrides).
 
 ## Repository layout
 
 | Path | Purpose |
 |------|---------|
-| `thinkscript/SignalBadgeCandles.thinkscript` | Main study source (copy/paste into TOS) |
+| `thinkscript/SignalBadge_v2.ts` | **Main study** — paste into Thinkorswim (ThinkScript; `.ts` is for editor recognition, not TypeScript) |
 
 ## Install in Thinkorswim
 
-1. Open **Charts** on a symbol with **Candle** chart type (Japanese candles).
+1. Open a chart (candlesticks recommended; script targets **1m–15m intraday** per its comments).
 2. **Studies** → **Edit studies…** → **Create…**
-3. Delete the template, paste the contents of `thinkscript/SignalBadgeCandles.thinkscript`.
-4. **Save** as `SignalBadgeCandles` (or any name) → **OK**.
-5. **Studies** → **Add study** → choose your saved study.
+3. Paste the full contents of `thinkscript/SignalBadge_v2.ts`.
+4. **Save** (e.g. `SignalBadge_v2`) → **OK** → add the study to the chart.
 
-## Customize signals
+Labels appear in the study/label area; optional SuperTrend/VWAP plots are commented at the bottom of the file.
 
-Edit the `bullSignal` and `bearSignal` definitions in the study. The defaults are simple placeholders (direction + volume); replace them with your indicators, price patterns, or conditions from your trading plan.
+## Configuration
 
-## Inputs
-
-- **showBullishBadges / showBearishBadges** — toggle long/short markers.
-- **useChartBubbles** — text bubbles on bars; when off, arrows only (if not hidden).
-- **bubbleOffsetTicks** — vertical spacing from the candle high/low.
-- **badgeTextBull / badgeTextBear** — label text for each side.
+Use the **inputs** at the top of the script (SuperTrend, ADX, VWAP bands, volume length, squeeze, pivot lookback, HTF aggregation, tier weights, `show_override_label`, etc.). The file header documents score bands, tier weights, and hard overrides (for example `ADX < 20`).
 
 ## Requirements
 
-- [Thinkorswim](https://www.thinkorswim.com/) desktop or web (ThinkScript features vary slightly by platform; this targets the standard chart study API).
+- [Thinkorswim](https://www.thinkorswim.com/) with ThinkScript studies enabled.
 
 ## Disclaimer
 
-This is educational scaffolding, not financial advice. Test on historical data and paper trading before relying on any signal logic.
+Not financial advice. Indicators are lagging; backtest and paper trade before live use.
