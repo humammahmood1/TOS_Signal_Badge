@@ -7,13 +7,14 @@
 #   Consolidates 7 indicator categories into a single weighted score displayed
 #   as a color-coded label on the price chart. Designed for intraday use only
 #   (1-minute through 15-minute charts, regular trading hours).
+#   Visual arrows with S/W strength labels added in v2.1
 #
 # SCORING:
-#   +9 to +11  → STRONG BUY  — CALL  (Bright Green)
-#   +5 to +8   → WEAK BUY   — CALL  (Light Green)
-#   -4 to +4   → NO TRADE          (Gray)
-#   -5 to -8   → WEAK SELL  — PUT   (Light Red)
-#   -9 to -11  → STRONG SELL — PUT  (Bright Red)
+#   +7 to +11  → STRONG BUY  — CALL  (Bright Green)
+#   +4 to +6   → WEAK BUY   — CALL  (Light Green)
+#   -3 to +3   → NO TRADE          (Gray)
+#   -4 to -6   → WEAK SELL  — PUT   (Light Red)
+#   -7 to -11  → STRONG SELL — PUT  (Bright Red)
 #
 # TIER WEIGHTS:
 #   Tier 1 (×2): SuperTrend, VWAP, TTM Squeeze
@@ -21,11 +22,11 @@
 #   Max Score: ±11
 #
 # OVERRIDES:
-#   ADX < 20             → Hard NO TRADE (regardless of score)
+#   ADX < 15             → Hard NO TRADE (regardless of score)
 #   Active count < 5     → INSUFFICIENT DATA
-#   ADX 20–25            → Score penalty: -2
+#   ADX 15–25            → Score penalty: -2
 #   Volume < average     → Score penalty: -2
-#   ST/HTF conflict      → Score penalty: -3
+#   ST/HTF conflict      → Score penalty: -1
 #
 # KNOWN LIMITATIONS:
 #   - Intraday only. VWAP resets daily; unreliable on daily+ timeframes.
@@ -36,9 +37,9 @@
 #
 # CHANGES FROM ORIGINAL BLUEPRINT:
 #   1. TTM Squeeze consolidated from 2 votes → 1 composite (anti-multicollinearity)
-#   2. ADX: hard override < 20; penalty 20–25 (Wilder 1978)
+#   2. ADX: hard override < 15; penalty 15–25 (Wilder 1978)
 #   3. Volume < avg converted from hard NO TRADE → penalty -2
-#   4. ST/HTF conflict converted from hard NO TRADE → penalty -3
+#   4. ST/HTF conflict converted from hard NO TRADE → penalty -1
 #   5. SuperTrend gray state removed (ADX handles chop detection)
 #   6. Tier 1/Tier 2 weighting added (was equal weight)
 #   7. INSUFFICIENT DATA rule added for < 5 active indicators
@@ -50,6 +51,10 @@ declare upper;
 #-----------------------------------------------------------------------------
 # PHASE 1: INPUT PARAMETERS
 #-----------------------------------------------------------------------------
+
+input show_arrows = yes;
+# Chart bubbles are fixed-size in Thinkorswim (often large). Off by default; arrow line weight still shows S vs W (5 vs 3).
+input show_strength_bubbles = no;
 
 # SuperTrend
 input st_atr_period   = 10;
@@ -124,7 +129,7 @@ def vwapActive  = 1;
 #--- 2C. TTM SQUEEZE (single composite vote) ---------------------------------
 # Bollinger Bands
 def sq_basis  = Average(close, sq_bb_length);
-def sq_dev    = StdDev(close, sq_bb_length);
+def sq_dev    = StDev(close, sq_bb_length);
 def sq_bb_up  = sq_basis + sq_bb_mult * sq_dev;
 def sq_bb_dn  = sq_basis - sq_bb_mult * sq_dev;
 
@@ -138,7 +143,7 @@ def squeezeOn = sq_bb_up <= sq_kc_up and sq_bb_dn >= sq_kc_dn;
 
 # Momentum histogram via linear regression of midline delta
 def sq_delta  = close - Average(Highest(high, sq_kc_length) + Lowest(low, sq_kc_length), 2) / 2 + Average(close, sq_kc_length) / 2;
-def sq_hist   = LinearRegValue(sq_delta, sq_hist_length, 0);
+def sq_hist   = Inertia(sq_delta, sq_hist_length);
 
 # Composite vote: squeeze just fired + histogram direction
 def sqFired   = squeezeOn[1] and !squeezeOn;   # Fired on prior confirmed bar
@@ -165,8 +170,8 @@ def adx_dx      = if adx_di_sum == 0 then 0 else 100 * adx_di_diff / adx_di_sum;
 def adxValue    = CompoundValue(1, (adxValue[1] * (adx_length - 1) + adx_dx) / adx_length, adx_dx);
 
 def adxStrong  = adxValue[1] >= 25 and adxValue[1] > adxValue[2];
-def adxGrayZone = adxValue[1] >= 20 and adxValue[1] < 25;
-def adxWeak    = adxValue[1] < 20;
+def adxGrayZone = adxValue[1] >= 15 and adxValue[1] < 25;
+def adxWeak    = adxValue[1] < 15;
 def adxActive  = 1;
 
 #--- 2E. VOLUME ---------------------------------------------------------------
@@ -222,8 +227,12 @@ def activeCount = stActive + vwapActive + squeezeActive + adxActive + volActive 
 # SuperTrend vote: +1 bull / -1 bear
 def stVote = if stBull then 1 else if stBear then -1 else 0;
 
-# VWAP vote: +1 above / -1 below / 0 equal
-def vwapVote = if vwapAbove then 1 else if vwapBelow then -1 else 0;
+# VWAP vote only counts when price is meaningfully away from VWAP (else neutral)
+def vwapDist = AbsValue(close[1] - vwapLine[1]) / vwapLine[1] * 100;
+def vwapVote = if vwapDist < 0.1 then 0
+               else if vwapAbove then 1
+               else if vwapBelow then -1
+               else 0;
 
 # TTM Squeeze composite vote:
 #   Fired + green histogram = +1 (bullish momentum release)
@@ -242,8 +251,10 @@ def adxVote = if adxStrong then 1 else 0;
 # Volume vote: above average = +1; below = 0 (penalty applied separately)
 def volVote = if volAboveAvg then 1 else 0;
 
-# HTF Bias vote: +1 bull / -1 bear
-def htfVote = if htfBull then 1 else if htfBear then -1 else 0;
+# HTF only penalizes conflict (see penaltySTHTF); doesn't add HTF conviction vs SuperTrend
+def htfVote = if htfBull and stBull then 1
+              else if htfBear and stBear then -1
+              else 0;
 
 # Pivot vote: +1 bull structure / -1 bear structure / 0 neutral
 def pivotVote = if pivotActive == 0 then 0
@@ -264,10 +275,25 @@ def rawScore =
 #--- 3D. SCORE PENALTIES ------------------------------------------------------
 def penaltyVol    = if !volAboveAvg then -2 else 0;
 def penaltyADX    = if adxGrayZone  then -2 else 0;
-def penaltySTHTF  = if (stBull and htfBear) or (stBear and htfBull) then -3 else 0;
+def penaltySTHTF  = if (stBull and htfBear) or (stBear and htfBull) then -1 else 0;
 def totalPenalty  = penaltyVol + penaltyADX + penaltySTHTF;
 
 def adjustedScore = rawScore + totalPenalty;
+
+# Fast-lane bearish: price below VWAP + squeeze histogram red +
+# ST bearish OR HTF bearish (only one needs to confirm)
+def bearFastLane = close[1] < vwapLine[1]
+                   and sqRed
+                   and !squeezeOn[1]
+                   and (stBear or htfBear)
+                   and adxValue[1] >= 15;
+
+# Fast-lane bullish: mirror condition
+def bullFastLane = close[1] > vwapLine[1]
+                   and sqGreen
+                   and !squeezeOn[1]
+                   and (stBull or htfBull)
+                   and adxValue[1] >= 15;
 
 #--- 3E. HARD OVERRIDES -------------------------------------------------------
 # 0 = normal scoring, 1 = force NO TRADE, 2 = INSUFFICIENT DATA
@@ -279,13 +305,17 @@ def overrideState =
 #--- 3F. SIGNAL CLASSIFICATION ------------------------------------------------
 # Signal codes: 4=STRONG BUY, 3=WEAK BUY, 2=NO TRADE, 1=WEAK SELL, 0=STRONG SELL, -1=INSUFFICIENT DATA
 def signalCode =
-    if overrideState == 2      then -1   # INSUFFICIENT DATA
-    else if overrideState == 1 then 2    # Hard NO TRADE (ADX < 20)
-    else if adjustedScore >= 9 then 4    # STRONG BUY
-    else if adjustedScore >= 5 then 3    # WEAK BUY
-    else if adjustedScore <= -9 then 0   # STRONG SELL
-    else if adjustedScore <= -5 then 1   # WEAK SELL
-    else                            2;   # NO TRADE
+    if overrideState == 2          then -1   # INSUFFICIENT DATA
+    else if overrideState == 1     then 2    # Hard NO TRADE (ADX < 15)
+    else if bearFastLane
+         and adjustedScore <= -2   then 1    # Fast-lane WEAK SELL
+    else if bullFastLane
+         and adjustedScore >= 2    then 3    # Fast-lane WEAK BUY
+    else if adjustedScore >= 7     then 4    # STRONG BUY
+    else if adjustedScore >= 4     then 3    # WEAK BUY
+    else if adjustedScore <= -7    then 0    # STRONG SELL
+    else if adjustedScore <= -4    then 1    # WEAK SELL
+    else                                2;   # NO TRADE
 
 #-----------------------------------------------------------------------------
 # PHASE 4: DISPLAY AND LABEL RENDERING
@@ -399,7 +429,7 @@ AddLabel(signalCode == -1,
 #--- 4D. OVERRIDE / PENALTY DETAIL LABEL (secondary, smaller context) --------
 
 AddLabel(show_override_label and overrideState == 1,
-    "[OVERRIDE: ADX < 20 — Hard NO TRADE]",
+    "[OVERRIDE: ADX < 15 — Hard NO TRADE]",
     Color.YELLOW);
 
 AddLabel(show_override_label and overrideState == 0 and totalPenalty < 0,
@@ -407,8 +437,44 @@ AddLabel(show_override_label and overrideState == 0 and totalPenalty < 0,
     (if penaltyVol  < 0 then " LowVol:" + penaltyVol  else "") +
     (if penaltyADX  < 0 then " ADX-Gray:" + penaltyADX  else "") +
     (if penaltySTHTF < 0 then " ST/HTF-Conflict:" + penaltySTHTF else "") +
-    "]",
+    "]" +
+    (if bearFastLane then " [FastLane:Bear]" else "") +
+    (if bullFastLane then " [FastLane:Bull]" else ""),
     Color.YELLOW);
+
+#--- 4G. SIGNAL ARROWS WITH STRENGTH LABELS -----------------------------------
+# Buy arrows below the bar; sell arrows above. S = strong, W = weak per signalCode.
+# Strength without bubbles: thick arrow = strong (line weight 5), thin = weak (line weight 3).
+# NO TRADE (2) and INSUFFICIENT DATA (-1): no arrows or bubbles. Toggle: show_arrows.
+# SELL arrows (signalCode 0 or 1) only when ADX >= 15. If ADX < 15, Phase 3 forces NO TRADE
+# (signalCode 2), so no bearish arrows appear — same rule as the top badge / override label.
+# Optional S/W chart bubbles: show_strength_bubbles (Thinkorswim does not resize bubble boxes).
+# Placement uses low[1]/high[1] for confirmed-bar alignment with the rest of the study.
+
+plot arrowStrongBuy = if show_arrows and signalCode == 4 then low[1] * 0.999 else Double.NaN;
+arrowStrongBuy.SetPaintingStrategy(PaintingStrategy.ARROW_UP);
+arrowStrongBuy.SetDefaultColor(Color.GREEN);
+arrowStrongBuy.SetLineWeight(5);
+
+plot arrowWeakBuy = if show_arrows and signalCode == 3 then low[1] * 0.9995 else Double.NaN;
+arrowWeakBuy.SetPaintingStrategy(PaintingStrategy.ARROW_UP);
+arrowWeakBuy.SetDefaultColor(Color.LIGHT_GREEN);
+arrowWeakBuy.SetLineWeight(3);
+
+plot arrowStrongSell = if show_arrows and signalCode == 0 then high[1] * 1.001 else Double.NaN;
+arrowStrongSell.SetPaintingStrategy(PaintingStrategy.ARROW_DOWN);
+arrowStrongSell.SetDefaultColor(Color.RED);
+arrowStrongSell.SetLineWeight(5);
+
+plot arrowWeakSell = if show_arrows and signalCode == 1 then high[1] * 1.0005 else Double.NaN;
+arrowWeakSell.SetPaintingStrategy(PaintingStrategy.ARROW_DOWN);
+arrowWeakSell.SetDefaultColor(Color.LIGHT_RED);
+arrowWeakSell.SetLineWeight(3);
+
+AddChartBubble(show_arrows and show_strength_bubbles and signalCode == 4, low[1] * 0.998,  "S", Color.GREEN,       no);
+AddChartBubble(show_arrows and show_strength_bubbles and signalCode == 3, low[1] * 0.998,  "W", Color.LIGHT_GREEN, no);
+AddChartBubble(show_arrows and show_strength_bubbles and signalCode == 0, high[1] * 1.002, "S", Color.RED,         yes);
+AddChartBubble(show_arrows and show_strength_bubbles and signalCode == 1, high[1] * 1.002, "W", Color.LIGHT_RED,   yes);
 
 #--- 4E. OPTIONAL: SUPERTREND LINE OVERLAY ------------------------------------
 # Uncomment to plot the SuperTrend line directly on the chart
